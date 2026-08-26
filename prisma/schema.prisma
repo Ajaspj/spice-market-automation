@@ -1,0 +1,131 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Farmer {
+  id              String   @id @default(cuid())
+  name            String
+  phoneNumber     String   @unique
+  whatsappEnabled Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  spices        FarmerSpice[]
+  notifications Notification[]
+}
+
+model Spice {
+  id   String @id @default(cuid())
+  name String
+  slug String @unique
+  unit String @default("kg")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  prices    AuctionPrice[]
+  farmers   FarmerSpice[]
+  histories PriceHistory[]
+}
+
+model FarmerSpice {
+  farmerId String
+  spiceId  String
+
+  farmer Farmer @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  spice  Spice  @relation(fields: [spiceId], references: [id], onDelete: Cascade)
+
+  @@id([farmerId, spiceId])
+}
+
+model Market {
+  id       String @id @default(cuid())
+  name     String
+  location String?
+
+  createdAt DateTime @default(now())
+
+  auctions Auction[]
+}
+
+enum AuctionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+model Auction {
+  id          String        @id @default(cuid())
+  marketId    String
+  auctionDate DateTime
+  status      AuctionStatus @default(PENDING)
+
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  market Market @relation(fields: [marketId], references: [id])
+  prices AuctionPrice[]
+
+  notifications Notification[]
+
+  @@unique([marketId, auctionDate])
+}
+
+model AuctionPrice {
+  id        String @id @default(cuid())
+  auctionId String
+  spiceId   String
+
+  minimumPrice Decimal @db.Decimal(12, 2)
+  maximumPrice Decimal @db.Decimal(12, 2)
+  averagePrice Decimal @db.Decimal(12, 2)
+
+  quantityArrived Decimal? @db.Decimal(12, 3)
+  quantitySold    Decimal? @db.Decimal(12, 3)
+
+  createdAt DateTime @default(now())
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  spice   Spice   @relation(fields: [spiceId], references: [id])
+
+  @@unique([auctionId, spiceId])
+}
+
+model PriceHistory {
+  id       String @id @default(cuid())
+  spiceId  String
+  date     DateTime
+
+  averagePrice     Decimal  @db.Decimal(12, 2)
+  percentageChange Decimal? @db.Decimal(8, 2)
+
+  spice Spice @relation(fields: [spiceId], references: [id])
+
+  @@unique([spiceId, date])
+}
+
+model Notification {
+  id        String @id @default(cuid())
+  farmerId  String
+  auctionId String
+
+  message String
+  status  String @default("PENDING")
+
+  sentAt   DateTime?
+  createdAt DateTime @default(now())
+
+  farmer  Farmer  @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+
+  @@unique([farmerId, auctionId])
+}
