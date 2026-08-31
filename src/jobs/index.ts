@@ -5,14 +5,28 @@ import {
   setupAuctionScheduler,
 } from "./auction.scheduler.js";
 
-export async function startJobs() {
+export async function startJobs(): Promise<void> {
+  console.log("");
+  console.log("==========================================");
+  console.log("🚀 STARTING BACKGROUND JOBS");
+  console.log("==========================================");
+
+  // ------------------------------------------
+  // WhatsApp Worker
+  // ------------------------------------------
+
+  console.log("📱 WhatsApp worker initialized.");
+
+  // ------------------------------------------
+  // Auction Scheduler
+  // ------------------------------------------
+
   await setupAuctionScheduler();
 
-  console.log(
-    "🚀 Background jobs started."
-  );
+  console.log("⏰ Auction scheduler initialized.");
 
-  console.log(
-    "📱 WhatsApp worker started."
-  );
+  console.log("");
+  console.log("==========================================");
+  console.log("✅ BACKGROUND JOBS READY");
+  console.log("==========================================");
 }

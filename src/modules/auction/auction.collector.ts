@@ -1,13 +1,17 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
-
-import {
-  AuctionCollectionResult,
-  RawAuctionRecord,
-} from "./auction.types.js";
+import { Agent } from "node:https";
 
 const SOURCE_URL =
   "https://www.indianspices.com/marketing/price/domestic/daily-price.html";
+
+const httpsAgent = new Agent({
+  family: 4,
+  keepAlive: true,
+});
+
+const REQUEST_TIMEOUT = 60_000;
+const MAX_RETRIES = 3;
 
 function parseNumber(value: string): number {
   const cleaned = value
@@ -56,78 +60,176 @@ function normalizeDate(date: string): string {
 }
 
 function formatDateForSource(date: Date): string {
-  const day = date.getDate().toString().padStart(2, "0");
+  /*
+   * The Spice Board publishes dates in:
+   *
+   * DD-MMM-YYYY
+   *
+   * We intentionally use the Asia/Kolkata calendar date
+   * instead of relying on the machine/container timezone.
+   */
 
-  const months = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
+  const indiaDate = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).formatToParts(date);
 
-  const month = months[date.getMonth()];
-  const year = date.getFullYear();
+  const day =
+    indiaDate.find((part) => part.type === "day")?.value ?? "";
+
+  const month =
+    indiaDate.find((part) => part.type === "month")?.value ?? "";
+
+  const year =
+    indiaDate.find((part) => part.type === "year")?.value ?? "";
 
   return `${day}-${month}-${year}`;
 }
 
+async function fetchAuctionPage() {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      console.log(
+        `🌐 Fetching Spice Board page (attempt ${attempt}/${MAX_RETRIES})...`
+      );
+
+      const response = await axios.get(SOURCE_URL, {
+        timeout: REQUEST_TIMEOUT,
+
+        httpsAgent,
+
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36",
+
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+
+          "Accept-Language":
+            "en-IN,en;q=0.9",
+
+          Connection: "keep-alive",
+        },
+
+        validateStatus: (status) =>
+          status >= 200 && status < 300,
+      });
+
+      return response;
+    } catch (error) {
+      lastError = error;
+
+      if (axios.isAxiosError(error)) {
+        console.error(
+          `❌ Spice Board request failed: ${error.code ?? "UNKNOWN"}`
+        );
+
+        console.error(
+          `   ${error.message}`
+        );
+      } else {
+        console.error(
+          "❌ Unexpected Spice Board request error:"
+        );
+
+        console.error(error);
+      }
+
+      if (attempt < MAX_RETRIES) {
+        const delay = attempt * 5000;
+
+        console.log(
+          `⏳ Retrying in ${delay / 1000} seconds...`
+        );
+
+        await new Promise((resolve) =>
+          setTimeout(resolve, delay)
+        );
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(
+        "Unable to fetch Spice Board auction page."
+      );
+}
+
 export async function collectTodayAuctions(
   targetDate: Date
-): Promise<AuctionCollectionResult> {
-  console.log("🌶️ Collecting official spice auction data...");
+) {
+  console.log(
+    "🌶️ Collecting official spice auction data..."
+  );
 
-  const response = await axios.get(SOURCE_URL, {
-    timeout: 30000,
+  const response = await fetchAuctionPage();
 
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36",
-      Accept:
-        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    },
-  });
-
-  console.log(`🌐 HTTP Status: ${response.status}`);
+  console.log(
+    `🌐 HTTP Status: ${response.status}`
+  );
 
   const $ = cheerio.load(response.data);
 
-  const targetDateString = targetDate
-    .toISOString()
-    .slice(0, 10);
+  /*
+   * Use India's calendar date.
+   */
+  const indiaDateString = new Intl.DateTimeFormat(
+    "en-CA",
+    {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }
+  ).format(targetDate);
 
-  const targetSourceDate = formatDateForSource(targetDate);
+  const targetSourceDate =
+    formatDateForSource(targetDate);
 
-  console.log(`📅 Looking for auction date: ${targetSourceDate}`);
+  console.log(
+    `📅 Looking for auction date: ${targetSourceDate}`
+  );
 
-  const records: RawAuctionRecord[] = [];
+  const records: Array<{
+    date: string;
+    auctioneer: string;
+    lots: number;
+    quantityArrived: number;
+    quantitySold: number;
+    maximumPrice: number;
+    minimumPrice: number;
+    averagePrice: number;
+  }> = [];
 
   $("table tr").each((_index, row) => {
     const cells = $(row)
       .find("td")
       .map((_cellIndex, cell) => {
-        return $(cell).text().trim();
+        return $(cell)
+          .text()
+          .replace(/\s+/g, " ")
+          .trim();
       })
       .get();
 
-    // Expected:
-    //
-    // 0 = Sno
-    // 1 = Date
-    // 2 = Auctioneer
-    // 3 = Lots
-    // 4 = Quantity Arrived
-    // 5 = Quantity Sold
-    // 6 = Maximum
-    // 7 = Minimum
-    // 8 = Average
+    /*
+     * Expected Spice Board columns:
+     *
+     * 0 = Sno
+     * 1 = Date
+     * 2 = Auctioneer
+     * 3 = Lots
+     * 4 = Quantity Arrived
+     * 5 = Quantity Sold
+     * 6 = Maximum
+     * 7 = Minimum
+     * 8 = Average
+     */
 
     if (cells.length < 9) {
       return;
@@ -139,35 +241,58 @@ export async function collectTodayAuctions(
       return;
     }
 
-    const record: RawAuctionRecord = {
+    const auctioneer = cells[2];
+
+    if (!auctioneer) {
+      return;
+    }
+
+    const record = {
       date: normalizeDate(rawDate),
 
-      auctioneer: cells[2],
+      auctioneer,
 
       lots: parseNumber(cells[3]),
 
-      quantityArrived: parseNumber(cells[4]),
+      quantityArrived: parseNumber(
+        cells[4]
+      ),
 
-      quantitySold: parseNumber(cells[5]),
+      quantitySold: parseNumber(
+        cells[5]
+      ),
 
-      maximumPrice: parseNumber(cells[6]),
+      maximumPrice: parseNumber(
+        cells[6]
+      ),
 
-      minimumPrice: parseNumber(cells[7]),
+      minimumPrice: parseNumber(
+        cells[7]
+      ),
 
-      averagePrice: parseNumber(cells[8]),
+      averagePrice: parseNumber(
+        cells[8]
+      ),
     };
 
     records.push(record);
+
+    console.log(
+      `🏪 ${record.auctioneer} | Min ₹${record.minimumPrice} | Max ₹${record.maximumPrice} | Avg ₹${record.averagePrice}`
+    );
   });
 
   console.log(
-    `📊 Found ${records.length} auction records for ${targetDateString}`
+    `📊 Found ${records.length} auction records for ${indiaDateString}`
   );
 
   return {
     source: SOURCE_URL,
-    auctionDate: targetDateString,
+
+    auctionDate: indiaDateString,
+
     completed: records.length > 0,
+
     records,
   };
 }

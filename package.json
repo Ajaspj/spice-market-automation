@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "test:whatsapp": "tsx src/jobs/test-whatsapp-api.ts",
+    "test:notification": "tsx src/jobs/test-daily-notification.ts",
+    "requeue:notifications": "tsx src/jobs/requeue-pending-notifications.ts",
+    "test:auction": "tsx src/jobs/test-auction.ts"
   },
   "keywords": [],
   "author": "",

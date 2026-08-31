@@ -7,7 +7,7 @@ import {
 } from "../modules/auction/auction.service.js";
 
 import {
-  createNotificationsForAuction,
+  createDailyFarmerNotifications,
 } from "../modules/notification/notification.service.js";
 
 export const auctionWorker =
@@ -23,6 +23,10 @@ export const auctionWorker =
       console.log(`🆔 Job: ${job.id}`);
 
       const today = new Date();
+
+      // ==========================================
+      // COLLECT TODAY'S AUCTIONS
+      // ==========================================
 
       const result =
         await collectAndSaveTodayAuctions(
@@ -45,20 +49,41 @@ export const auctionWorker =
       );
 
       // ==========================================
-      // CREATE FARMER NOTIFICATIONS
+      // CREATE ONE DAILY NOTIFICATION
+      // PER FARMER
       // ==========================================
 
-      for (const record of result.records) {
-        await createNotificationsForAuction(
-          record.auction.id
+      const notificationResult =
+        await createDailyFarmerNotifications(
+          today
         );
-      }
+
+      console.log("");
+
+      console.log(
+        `📱 Farmer notifications created: ${notificationResult.created}`
+      );
+
+      console.log(
+        `⏭️ Farmer notifications skipped: ${notificationResult.skipped}`
+      );
 
       console.log(
         "🎉 Today's auction processing completed."
       );
 
-      return result;
+      return {
+        completed: true,
+
+        auctionRecords:
+          result.records.length,
+
+        notificationsCreated:
+          notificationResult.created,
+
+        notificationsSkipped:
+          notificationResult.skipped,
+      };
     },
 
     {
@@ -73,6 +98,10 @@ export const auctionWorker =
     }
   );
 
+// ==========================================
+// JOB COMPLETED
+// ==========================================
+
 auctionWorker.on(
   "completed",
   (job) => {
@@ -81,6 +110,10 @@ auctionWorker.on(
     );
   }
 );
+
+// ==========================================
+// JOB FAILED
+// ==========================================
 
 auctionWorker.on(
   "failed",

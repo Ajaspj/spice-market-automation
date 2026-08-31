@@ -1,26 +1,80 @@
 services:
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: spice-automation-app
+
+    restart: unless-stopped
+
+    env_file:
+      - .env.production
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      redis:
+        condition: service_started
+
+    ports:
+      - "5000:5000"
+
   postgres:
     image: postgres:17
+
     container_name: spice-automation-db
+
     restart: unless-stopped
+
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: spice_automation
+
     ports:
       - "5433:5432"
+
     volumes:
       - spice_automation_data:/var/lib/postgresql/data
 
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U postgres -d spice_automation"
+        ]
+
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
   redis:
     image: redis:8-alpine
+
     container_name: spice-automation-redis
+
     restart: unless-stopped
+
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes"
+      ]
+
     ports:
       - "6380:6379"
+
     volumes:
       - spice_automation_redis:/data
 
+
 volumes:
+
   spice_automation_data:
+
   spice_automation_redis:
